@@ -1,0 +1,9 @@
+.github/
+.vscode/
+config/
+docs/
+node_modules/
+.gitignore
+docker-compose.yml
+Dockerfile
+**/config.yaml

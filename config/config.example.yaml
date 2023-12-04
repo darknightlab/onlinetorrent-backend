@@ -1,0 +1,14 @@
+port: 80
+authtoken: 123456
+
+qbservers:
+  - name: qBittorrent1
+    qbURL: http://127.0.0.1:8888
+    webseedURL: https://127.0.0.1:80
+    username: username
+    password: password
+    category: projectj
+    ratioLimit: 0 # 0 is no limit
+    seedingTimeLimit: 0 # minutes
+    sequentialDownload: true
+    firstLastPiecePrio: true
