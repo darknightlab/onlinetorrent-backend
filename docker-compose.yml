@@ -4,7 +4,7 @@ version: "3"
 
 services:
     onlinetorrent:
-        image: darknightlab/onlineTorrent-backend:latest
+        image: darknightlab/onlinetorrent-backend:latest
         # build: .
         container_name: onlinetorrent
         restart: always
