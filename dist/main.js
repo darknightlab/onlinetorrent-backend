@@ -5,6 +5,7 @@ import express from "express";
 import parseTorrent from "parse-torrent";
 import { toMagnetURI } from "parse-torrent";
 import { qBittorrentClient } from "@robertklep/qbittorrent";
+import cors from "cors";
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
 class qbServer {
@@ -51,6 +52,7 @@ for (let i = 0; i < config.qbservers.length; i++) {
     qbservers.push(new qbServer(config.qbservers[i]));
 }
 const app = express();
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 async function sendToServers(t) {

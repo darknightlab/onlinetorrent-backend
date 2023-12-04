@@ -1,11 +1,11 @@
 FROM node:lts-bookworm-slim
 
 
-# install OnlineTorrent-Backend
-WORKDIR /OnlineTorrent
+# install onlinetorrent-backend
+WORKDIR /onlinetorrent
 COPY . .
-RUN cd /OnlineTorrent && npm install 
+RUN cd /onlinetorrent && npm install 
 
-VOLUME [ "/OnlineTorrent/config" ]
+VOLUME [ "/onlinetorrent/config" ]
 
 CMD [ "npm", "start" ]

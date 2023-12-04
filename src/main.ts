@@ -7,6 +7,7 @@ import parseTorrent from "parse-torrent";
 import { toMagnetURI, toTorrentFile } from "parse-torrent";
 import magnet from "magnet-uri";
 import { qBittorrentClient, TorrentAddParameters } from "@robertklep/qbittorrent";
+import cors from "cors";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -59,6 +60,7 @@ for (let i = 0; i < config.qbservers.length; i++) {
 }
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
