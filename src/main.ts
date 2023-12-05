@@ -5,10 +5,10 @@ import express from "express";
 import parseTorrent from "parse-torrent";
 import { toMagnetURI, toTorrentFile } from "parse-torrent";
 import magnet from "magnet-uri";
-import { qBittorrentClient, TorrentAddParameters } from "@robertklep/qbittorrent";
+import { qBittorrentClient, TorrentAddParameters, TorrentInfoParameters } from "@robertklep/qbittorrent";
 import asyncHandler from "express-async-handler";
 import cors from "cors";
-import { info } from "console";
+import { string } from "yaml/dist/schema/common/string";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -95,7 +95,22 @@ class qbServerList {
     log: {} = {};
     sync: {} = {};
     transfer: {} = {};
-    torrents: {} = {};
+    torrents: {
+        info: (i: TorrentInfoParameters) => Promise<{ [key: string]: any }>;
+    } = {
+        info: async (i: TorrentInfoParameters) => {
+            let resdict: { [key: string]: any } = {};
+            for (let s of this.qbservers) {
+                try {
+                    let r = await s.qb.torrents.info(i);
+                    resdict[s.name] = r;
+                } catch (e) {
+                    console.log(e);
+                }
+            }
+            return resdict;
+        },
+    };
     search: {} = {};
 
     constructor(serverlist: any[]) {
@@ -109,7 +124,7 @@ class qbServerList {
         }
     }
 
-    info() {
+    serverinfo() {
         let serverInfo = [];
         for (let i = 0; i < this.qbservers.length; i++) {
             serverInfo.push(this.qbservers[i].info());
@@ -124,9 +139,20 @@ class qbServerList {
         }
         results = await Promise.all(results);
 
-        let resdict: { [key: string]: any } = {};
+        let resdict: { [key: string]: any } = {
+            info: {},
+            magnetURI: undefined,
+        };
         for (let i = 0; i < results.length; i++) {
-            resdict[this.qbservers[i].name] = results[i];
+            resdict.info[this.qbservers[i].name] = results[i];
+        }
+        let i: TorrentInfoParameters | any = {
+            filter: "all",
+            hashes: torrent.infoHash,
+        };
+        let tinfo = await this.torrents.info(i);
+        for (let value of Object.values(tinfo)) {
+            resdict.magnetURI = resdict.magnetURI || value[0].magnet_uri;
         }
         return resdict;
     }
@@ -163,16 +189,16 @@ app.post(
         let magnetURI = req.body.magnetURI;
         let torrent = await parseTorrent(magnetURI);
         let resdict = await qbserverlist.addTorrent(torrent);
-        res.json({ info: resdict });
+        res.json(resdict);
     })
 );
 
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
 app.get("/api/v1/servers/get", (req, res) => {
-    res.json(qbserverlist.info());
+    res.json(qbserverlist.serverinfo());
 });
 
-const port = config.port | 80;
+const port = config.port || 80;
 app.listen(port, () => {
     console.log(`Server started at http://0.0.0.0:${port}`);
 });

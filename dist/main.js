@@ -87,7 +87,21 @@ class qbServerList {
     log = {};
     sync = {};
     transfer = {};
-    torrents = {};
+    torrents = {
+        info: async (i) => {
+            let resdict = {};
+            for (let s of this.qbservers) {
+                try {
+                    let r = await s.qb.torrents.info(i);
+                    resdict[s.name] = r;
+                }
+                catch (e) {
+                    console.log(e);
+                }
+            }
+            return resdict;
+        },
+    };
     search = {};
     constructor(serverlist) {
         this.qbservers = [];
@@ -100,7 +114,7 @@ class qbServerList {
             }
         }
     }
-    info() {
+    serverinfo() {
         let serverInfo = [];
         for (let i = 0; i < this.qbservers.length; i++) {
             serverInfo.push(this.qbservers[i].info());
@@ -113,9 +127,20 @@ class qbServerList {
             results.push(this.qbservers[i].addTorrent(torrent));
         }
         results = await Promise.all(results);
-        let resdict = {};
+        let resdict = {
+            info: {},
+            magnetURI: undefined,
+        };
         for (let i = 0; i < results.length; i++) {
-            resdict[this.qbservers[i].name] = results[i];
+            resdict.info[this.qbservers[i].name] = results[i];
+        }
+        let i = {
+            filter: "all",
+            hashes: torrent.infoHash,
+        };
+        let tinfo = await this.torrents.info(i);
+        for (let value of Object.values(tinfo)) {
+            resdict.magnetURI = resdict.magnetURI || value[0].magnet_uri;
         }
         return resdict;
     }
@@ -148,13 +173,13 @@ app.post("/api/v1/torrents/add", asyncHandler(async (req, res) => {
     let magnetURI = req.body.magnetURI;
     let torrent = await parseTorrent(magnetURI);
     let resdict = await qbserverlist.addTorrent(torrent);
-    res.json({ info: resdict });
+    res.json(resdict);
 }));
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
 app.get("/api/v1/servers/get", (req, res) => {
-    res.json(qbserverlist.info());
+    res.json(qbserverlist.serverinfo());
 });
-const port = config.port | 80;
+const port = config.port || 80;
 app.listen(port, () => {
     console.log(`Server started at http://0.0.0.0:${port}`);
 });
