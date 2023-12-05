@@ -1,6 +1,6 @@
 {
     "name": "onlinetorrent-backend",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "description": "onlinetorrent的网页后端",
     "main": "dist/main.js",
     "type": "module",
