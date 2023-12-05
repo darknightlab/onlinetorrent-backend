@@ -9,6 +9,21 @@ import asyncHandler from "express-async-handler";
 import cors from "cors";
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
+function sleep(ms) {
+    return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
+}
+async function processPromises(promises) {
+    let results = await Promise.allSettled(promises);
+    return results.map((result) => (result.status === "fulfilled" ? result.value : result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
+}
+async function processPromisesDict(promises) {
+    let resdict = {};
+    let results = await processPromises(promises);
+    for (let i = 0; i < results.length; i++) {
+        resdict[qbserverlist.qbservers[i].name] = results[i];
+    }
+    return resdict;
+}
 class qbServer {
     name;
     qbURL;
@@ -23,6 +38,7 @@ class qbServer {
     online = false;
     qb;
     checkOnlineTimer;
+    checkFinishedTimer;
     constructor(serverObj) {
         this.name = serverObj.name;
         this.qbURL = serverObj.qbURL;
@@ -30,14 +46,32 @@ class qbServer {
         this.username = serverObj.username;
         this.password = serverObj.password;
         this.category = serverObj.category || "projectk";
-        this.ratioLimit = serverObj.ratioLimit || 0;
-        this.seedingTimeLimit = serverObj.seedingTimeLimit || 0;
+        this.ratioLimit = serverObj.ratioLimit || undefined;
+        this.seedingTimeLimit = serverObj.seedingTimeLimit || undefined;
         this.sequentialDownload = serverObj.sequentialDownload || true;
         this.firstLastPiecePrio = serverObj.firstLastPiecePrio || true;
         this.qb = new qBittorrentClient(this.qbURL, this.username, this.password);
         this.online = true;
-        this.checkOnlineTimer = setInterval(() => {
-            this.checkOnline();
+        this.checkOnlineTimer = setInterval(async () => {
+            await Promise.race([this.checkOnline(), sleep(60 * 1000)]);
+        }, 5 * 60 * 1000);
+        this.checkFinishedTimer = setInterval(async () => {
+            try {
+                let result = await Promise.race([this.torrentsInfo(), sleep(60 * 1000)]);
+                if (result) {
+                    let delres = [];
+                    for (let tinfo of result) {
+                        if (tinfo.state == "pausedUP" && tinfo.eta == 8640000) {
+                            delres.push(this.qb.torrents.delete(tinfo.hash, true));
+                        }
+                    }
+                    let resdict = await processPromisesDict(delres);
+                    console.log(resdict);
+                }
+            }
+            catch (e) {
+                console.error(e);
+            }
         }, 5 * 60 * 1000);
     }
     async checkOnline() {
@@ -67,7 +101,21 @@ class qbServer {
             online: this.online,
         };
     }
-    async addTorrent(torrent) {
+    async torrentsInfo(p) {
+        let t;
+        if (!p) {
+            t = {
+                filter: "all",
+                category: this.category,
+            };
+        }
+        else {
+            t = p;
+            t.category = this.category;
+        }
+        return await this.qb.torrents.info(t);
+    }
+    async torrentsAdd(torrent) {
         let uri = toMagnetURI(torrent);
         let t = {
             urls: uri,
@@ -87,21 +135,7 @@ class qbServerList {
     log = {};
     sync = {};
     transfer = {};
-    torrents = {
-        info: async (i) => {
-            let resdict = {};
-            for (let s of this.qbservers) {
-                try {
-                    let r = await s.qb.torrents.info(i);
-                    resdict[s.name] = r;
-                }
-                catch (e) {
-                    console.log(e);
-                }
-            }
-            return resdict;
-        },
-    };
+    torrents = {};
     search = {};
     constructor(serverlist) {
         this.qbservers = [];
@@ -121,12 +155,20 @@ class qbServerList {
         }
         return { info: serverInfo };
     }
-    async addTorrent(torrent) {
+    async torrentsInfo(p) {
+        let results = [];
+        for (let s of this.qbservers) {
+            results.push(s.torrentsInfo(p));
+        }
+        let resdict = await processPromisesDict(results);
+        return resdict;
+    }
+    async torrentsAdd(torrent) {
         let results = [];
         for (let i = 0; i < this.qbservers.length; i++) {
-            results.push(this.qbservers[i].addTorrent(torrent));
+            results.push(this.qbservers[i].torrentsAdd(torrent));
         }
-        results = await Promise.all(results);
+        results = await processPromises(results);
         let resdict = {
             info: {},
             magnetURI: undefined,
@@ -134,14 +176,22 @@ class qbServerList {
         for (let i = 0; i < results.length; i++) {
             resdict.info[this.qbservers[i].name] = results[i];
         }
-        let i = {
+        let p = {
             filter: "all",
             hashes: torrent.infoHash,
         };
-        let tinfo = await this.torrents.info(i);
+        let tinfo = await this.torrentsInfo(p);
         for (let value of Object.values(tinfo)) {
             resdict.magnetURI = resdict.magnetURI || value[0].magnet_uri;
         }
+        return resdict;
+    }
+    async torrentsDelete(torrent) {
+        let delres = [];
+        for (let s of this.qbservers) {
+            delres.push(s.qb.torrents.delete(torrent.infoHash, true));
+        }
+        let resdict = await processPromisesDict(delres);
         return resdict;
     }
 }
@@ -172,7 +222,13 @@ app.get("/api/v1/reload", (req, res) => {
 app.post("/api/v1/torrents/add", asyncHandler(async (req, res) => {
     let magnetURI = req.body.magnetURI;
     let torrent = await parseTorrent(magnetURI);
-    let resdict = await qbserverlist.addTorrent(torrent);
+    let resdict = await qbserverlist.torrentsAdd(torrent);
+    res.json(resdict);
+}));
+app.post("/api/v1/torrents/delete", asyncHandler(async (req, res) => {
+    let hash = req.body.hash;
+    let torrent = await parseTorrent(hash);
+    let resdict = await qbserverlist.torrentsDelete(torrent);
     res.json(resdict);
 }));
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息

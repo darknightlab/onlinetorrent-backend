@@ -8,7 +8,7 @@ qbservers:
     username: username
     password: password
     category: projectj
-    ratioLimit: 0 # 0 is no limit
-    seedingTimeLimit: 0 # minutes
+    ratioLimit: # undefined is no limit
+    seedingTimeLimit: # minutes, undefined is no limit
     sequentialDownload: true
     firstLastPiecePrio: true

@@ -8,10 +8,27 @@ import magnet from "magnet-uri";
 import { qBittorrentClient, TorrentAddParameters, TorrentInfoParameters } from "@robertklep/qbittorrent";
 import asyncHandler from "express-async-handler";
 import cors from "cors";
-import { string } from "yaml/dist/schema/common/string";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
+
+function sleep(ms: number) {
+    return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
+}
+
+async function processPromises<T>(promises: Promise<T>[]): Promise<(T | Error)[]> {
+    let results = await Promise.allSettled(promises);
+    return results.map((result) => (result.status === "fulfilled" ? result.value : result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
+}
+
+async function processPromisesDict<T>(promises: Promise<T>[]): Promise<{ [key: string]: Error | T }> {
+    let resdict: { [key: string]: T | Error } = {};
+    let results = await processPromises(promises);
+    for (let i = 0; i < results.length; i++) {
+        resdict[qbserverlist.qbservers[i].name] = results[i];
+    }
+    return resdict;
+}
 
 class qbServer {
     name: string;
@@ -20,13 +37,14 @@ class qbServer {
     username: string;
     password: string;
     category: string;
-    ratioLimit: number;
-    seedingTimeLimit: number; // minutes
+    ratioLimit: number | undefined;
+    seedingTimeLimit: number | undefined; // minutes
     sequentialDownload: boolean;
     firstLastPiecePrio: boolean;
     online: boolean = false;
     qb: qBittorrentClient;
     checkOnlineTimer: NodeJS.Timeout;
+    checkFinishedTimer: NodeJS.Timeout;
 
     constructor(serverObj: any) {
         this.name = serverObj.name;
@@ -35,15 +53,33 @@ class qbServer {
         this.username = serverObj.username;
         this.password = serverObj.password;
         this.category = serverObj.category || "projectk";
-        this.ratioLimit = serverObj.ratioLimit || 0;
-        this.seedingTimeLimit = serverObj.seedingTimeLimit || 0;
+        this.ratioLimit = serverObj.ratioLimit || undefined;
+        this.seedingTimeLimit = serverObj.seedingTimeLimit || undefined;
         this.sequentialDownload = serverObj.sequentialDownload || true;
         this.firstLastPiecePrio = serverObj.firstLastPiecePrio || true;
         this.qb = new qBittorrentClient(this.qbURL, this.username, this.password);
         this.online = true;
 
-        this.checkOnlineTimer = setInterval(() => {
-            this.checkOnline();
+        this.checkOnlineTimer = setInterval(async () => {
+            await Promise.race([this.checkOnline(), sleep(60 * 1000)]);
+        }, 5 * 60 * 1000);
+
+        this.checkFinishedTimer = setInterval(async () => {
+            try {
+                let result = await Promise.race([this.torrentsInfo(), sleep(60 * 1000)]);
+                if (result) {
+                    let delres = [];
+                    for (let tinfo of result) {
+                        if (tinfo.state == "pausedUP" && tinfo.eta == 8640000) {
+                            delres.push(this.qb.torrents.delete(tinfo.hash, true));
+                        }
+                    }
+                    let resdict = await processPromisesDict(delres);
+                    console.log(resdict);
+                }
+            } catch (e) {
+                console.error(e);
+            }
         }, 5 * 60 * 1000);
     }
 
@@ -74,7 +110,21 @@ class qbServer {
         };
     }
 
-    async addTorrent(torrent: magnet.Instance) {
+    async torrentsInfo(p?: TorrentInfoParameters) {
+        let t: TorrentInfoParameters | any;
+        if (!p) {
+            t = {
+                filter: "all",
+                category: this.category,
+            };
+        } else {
+            t = p;
+            t.category = this.category;
+        }
+        return await this.qb.torrents.info(t);
+    }
+
+    async torrentsAdd(torrent: magnet.Instance) {
         let uri = toMagnetURI(torrent);
         let t: TorrentAddParameters | any = {
             urls: uri,
@@ -95,22 +145,7 @@ class qbServerList {
     log: {} = {};
     sync: {} = {};
     transfer: {} = {};
-    torrents: {
-        info: (i: TorrentInfoParameters) => Promise<{ [key: string]: any }>;
-    } = {
-        info: async (i: TorrentInfoParameters) => {
-            let resdict: { [key: string]: any } = {};
-            for (let s of this.qbservers) {
-                try {
-                    let r = await s.qb.torrents.info(i);
-                    resdict[s.name] = r;
-                } catch (e) {
-                    console.log(e);
-                }
-            }
-            return resdict;
-        },
-    };
+    torrents: {} = {};
     search: {} = {};
 
     constructor(serverlist: any[]) {
@@ -132,12 +167,21 @@ class qbServerList {
         return { info: serverInfo };
     }
 
-    async addTorrent(torrent: magnet.Instance) {
+    async torrentsInfo(p?: TorrentInfoParameters) {
+        let results = [];
+        for (let s of this.qbservers) {
+            results.push(s.torrentsInfo(p));
+        }
+        let resdict = await processPromisesDict(results);
+        return resdict;
+    }
+
+    async torrentsAdd(torrent: magnet.Instance) {
         let results = [];
         for (let i = 0; i < this.qbservers.length; i++) {
-            results.push(this.qbservers[i].addTorrent(torrent));
+            results.push(this.qbservers[i].torrentsAdd(torrent));
         }
-        results = await Promise.all(results);
+        results = await processPromises(results);
 
         let resdict: { [key: string]: any } = {
             info: {},
@@ -146,14 +190,23 @@ class qbServerList {
         for (let i = 0; i < results.length; i++) {
             resdict.info[this.qbservers[i].name] = results[i];
         }
-        let i: TorrentInfoParameters | any = {
+        let p: TorrentInfoParameters | any = {
             filter: "all",
             hashes: torrent.infoHash,
         };
-        let tinfo = await this.torrents.info(i);
+        let tinfo = await this.torrentsInfo(p);
         for (let value of Object.values(tinfo)) {
             resdict.magnetURI = resdict.magnetURI || value[0].magnet_uri;
         }
+        return resdict;
+    }
+
+    async torrentsDelete(torrent: magnet.Instance) {
+        let delres = [];
+        for (let s of this.qbservers) {
+            delres.push(s.qb.torrents.delete(torrent.infoHash!, true));
+        }
+        let resdict = await processPromisesDict(delres);
         return resdict;
     }
 }
@@ -188,7 +241,17 @@ app.post(
     asyncHandler(async (req, res) => {
         let magnetURI = req.body.magnetURI;
         let torrent = await parseTorrent(magnetURI);
-        let resdict = await qbserverlist.addTorrent(torrent);
+        let resdict = await qbserverlist.torrentsAdd(torrent);
+        res.json(resdict);
+    })
+);
+
+app.post(
+    "/api/v1/torrents/delete",
+    asyncHandler(async (req, res) => {
+        let hash = req.body.hash;
+        let torrent = await parseTorrent(hash);
+        let resdict = await qbserverlist.torrentsDelete(torrent);
         res.json(resdict);
     })
 );
