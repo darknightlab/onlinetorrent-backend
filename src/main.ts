@@ -2,7 +2,6 @@
 import fs from "fs";
 import YAML from "yaml";
 import express from "express";
-import WebTorrent from "webtorrent";
 import parseTorrent from "parse-torrent";
 import { toMagnetURI, toTorrentFile } from "parse-torrent";
 import magnet from "magnet-uri";
@@ -24,8 +23,10 @@ class qbServer {
     seedingTimeLimit: number; // minutes
     sequentialDownload: boolean;
     firstLastPiecePrio: boolean;
-
+    online: boolean = false;
     qb: qBittorrentClient;
+    checkOnlineTimer: NodeJS.Timeout;
+
     constructor(serverObj: any) {
         this.name = serverObj.name;
         this.qbURL = serverObj.qbURL;
@@ -38,6 +39,38 @@ class qbServer {
         this.sequentialDownload = serverObj.sequentialDownload || true;
         this.firstLastPiecePrio = serverObj.firstLastPiecePrio || true;
         this.qb = new qBittorrentClient(this.qbURL, this.username, this.password);
+        this.online = true;
+
+        this.checkOnlineTimer = setInterval(() => {
+            this.checkOnline();
+        }, 5 * 60 * 1000);
+    }
+
+    async checkOnline() {
+        try {
+            let res = await this.qb.app.version();
+            if (res) {
+                this.online = true;
+            } else {
+                this.online = false;
+            }
+        } catch (e) {
+            this.online = false;
+        }
+    }
+
+    info() {
+        return {
+            name: this.name,
+            qbURL: this.qbURL,
+            webseedURL: this.webseedURL,
+            category: this.category,
+            ratioLimit: this.ratioLimit,
+            seedingTimeLimit: this.seedingTimeLimit,
+            sequentialDownload: this.sequentialDownload,
+            firstLastPiecePrio: this.firstLastPiecePrio,
+            online: this.online,
+        };
     }
 
     async addTorrent(torrent: magnet.Instance) {
@@ -57,7 +90,11 @@ class qbServer {
 
 var qbservers: qbServer[] = [];
 for (let i = 0; i < config.qbservers.length; i++) {
-    qbservers.push(new qbServer(config.qbservers[i]));
+    try {
+        qbservers.push(new qbServer(config.qbservers[i]));
+    } catch (e) {
+        console.log(e);
+    }
 }
 
 const app = express();
@@ -86,7 +123,11 @@ app.get("/api/v1/reload", (req, res) => {
             let config1 = YAML.parse(fs.readFileSync(configPath, "utf8"));
             let qbservers1 = [];
             for (let i = 0; i < config1.qbservers.length; i++) {
-                qbservers1.push(new qbServer(config.qbservers[i]));
+                try {
+                    qbservers1.push(new qbServer(config.qbservers[i]));
+                } catch (e) {
+                    console.log(e);
+                }
             }
             config = config1;
             qbservers = qbservers1;
@@ -109,6 +150,15 @@ app.post(
         res.json({ info: resdict });
     })
 );
+
+// 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
+app.get("/api/v1/servers/get", (req, res) => {
+    let serverInfo = [];
+    for (let i = 0; i < qbservers.length; i++) {
+        serverInfo.push(qbservers[i].info());
+    }
+    res.json({ info: serverInfo });
+});
 
 const port = config.port | 80;
 app.listen(port, () => {
