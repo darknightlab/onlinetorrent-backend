@@ -77,51 +77,62 @@ class qbServer {
             sequentialDownload: this.sequentialDownload,
             firstLastPiecePrio: this.firstLastPiecePrio,
         };
-        const torrentInfo = await this.qb.torrents.add(t);
-        return torrentInfo;
+        return await this.qb.torrents.add(t);
     }
 }
-var qbservers = [];
-for (let i = 0; i < config.qbservers.length; i++) {
-    try {
-        qbservers.push(new qbServer(config.qbservers[i]));
+class qbServerList {
+    qbservers;
+    auth = {};
+    app = {};
+    log = {};
+    sync = {};
+    transfer = {};
+    torrents = {};
+    search = {};
+    constructor(serverlist) {
+        this.qbservers = [];
+        for (let i = 0; i < serverlist.length; i++) {
+            try {
+                this.qbservers.push(new qbServer(serverlist[i]));
+            }
+            catch (e) {
+                console.log(e);
+            }
+        }
     }
-    catch (e) {
-        console.log(e);
+    info() {
+        let serverInfo = [];
+        for (let i = 0; i < this.qbservers.length; i++) {
+            serverInfo.push(this.qbservers[i].info());
+        }
+        return { info: serverInfo };
+    }
+    async addTorrent(torrent) {
+        let results = [];
+        for (let i = 0; i < this.qbservers.length; i++) {
+            results.push(this.qbservers[i].addTorrent(torrent));
+        }
+        results = await Promise.all(results);
+        let resdict = {};
+        for (let i = 0; i < results.length; i++) {
+            resdict[this.qbservers[i].name] = results[i];
+        }
+        return resdict;
     }
 }
+var qbserverlist = new qbServerList(config.qbservers);
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-async function sendToServers(t) {
-    let results = [];
-    for (let i = 0; i < qbservers.length; i++) {
-        results.push(qbservers[i].addTorrent(t));
-    }
-    results = await Promise.all(results);
-    let resdict = {};
-    for (let i = 0; i < results.length; i++) {
-        resdict[qbservers[i].name] = results[i];
-    }
-    return resdict;
-}
 // 在/api/v1/reload 接收GET请求，重新加载配置文件， 需要判断authtoken是否正确
 app.get("/api/v1/reload", (req, res) => {
     if (req.query.authtoken == config.authtoken) {
         try {
             let config1 = YAML.parse(fs.readFileSync(configPath, "utf8"));
-            let qbservers1 = [];
-            for (let i = 0; i < config1.qbservers.length; i++) {
-                try {
-                    qbservers1.push(new qbServer(config.qbservers[i]));
-                }
-                catch (e) {
-                    console.log(e);
-                }
-            }
+            let qbserverlist1 = new qbServerList(config1.qbservers);
             config = config1;
-            qbservers = qbservers1;
+            qbserverlist = qbserverlist1;
             res.json({ info: "reloaded" });
         }
         catch (e) {
@@ -136,16 +147,12 @@ app.get("/api/v1/reload", (req, res) => {
 app.post("/api/v1/torrents/add", asyncHandler(async (req, res) => {
     let magnetURI = req.body.magnetURI;
     let torrent = await parseTorrent(magnetURI);
-    let resdict = await sendToServers(torrent);
+    let resdict = await qbserverlist.addTorrent(torrent);
     res.json({ info: resdict });
 }));
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
 app.get("/api/v1/servers/get", (req, res) => {
-    let serverInfo = [];
-    for (let i = 0; i < qbservers.length; i++) {
-        serverInfo.push(qbservers[i].info());
-    }
-    res.json({ info: serverInfo });
+    res.json(qbserverlist.info());
 });
 const port = config.port | 80;
 app.listen(port, () => {

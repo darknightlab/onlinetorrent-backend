@@ -8,6 +8,7 @@ import magnet from "magnet-uri";
 import { qBittorrentClient, TorrentAddParameters } from "@robertklep/qbittorrent";
 import asyncHandler from "express-async-handler";
 import cors from "cors";
+import { info } from "console";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
@@ -83,54 +84,69 @@ class qbServer {
             sequentialDownload: this.sequentialDownload,
             firstLastPiecePrio: this.firstLastPiecePrio,
         };
-        const torrentInfo = await this.qb.torrents.add(t);
-        return torrentInfo;
+        return await this.qb.torrents.add(t);
     }
 }
 
-var qbservers: qbServer[] = [];
-for (let i = 0; i < config.qbservers.length; i++) {
-    try {
-        qbservers.push(new qbServer(config.qbservers[i]));
-    } catch (e) {
-        console.log(e);
+class qbServerList {
+    qbservers: qbServer[];
+    auth: {} = {};
+    app: {} = {};
+    log: {} = {};
+    sync: {} = {};
+    transfer: {} = {};
+    torrents: {} = {};
+    search: {} = {};
+
+    constructor(serverlist: any[]) {
+        this.qbservers = [];
+        for (let i = 0; i < serverlist.length; i++) {
+            try {
+                this.qbservers.push(new qbServer(serverlist[i]));
+            } catch (e) {
+                console.log(e);
+            }
+        }
+    }
+
+    info() {
+        let serverInfo = [];
+        for (let i = 0; i < this.qbservers.length; i++) {
+            serverInfo.push(this.qbservers[i].info());
+        }
+        return { info: serverInfo };
+    }
+
+    async addTorrent(torrent: magnet.Instance) {
+        let results = [];
+        for (let i = 0; i < this.qbservers.length; i++) {
+            results.push(this.qbservers[i].addTorrent(torrent));
+        }
+        results = await Promise.all(results);
+
+        let resdict: { [key: string]: any } = {};
+        for (let i = 0; i < results.length; i++) {
+            resdict[this.qbservers[i].name] = results[i];
+        }
+        return resdict;
     }
 }
+
+var qbserverlist = new qbServerList(config.qbservers);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-async function sendToServers(t: magnet.Instance) {
-    let results = [];
-    for (let i = 0; i < qbservers.length; i++) {
-        results.push(qbservers[i].addTorrent(t));
-    }
-    results = await Promise.all(results);
-
-    let resdict: { [key: string]: any } = {};
-    for (let i = 0; i < results.length; i++) {
-        resdict[qbservers[i].name] = results[i];
-    }
-    return resdict;
-}
-
 // 在/api/v1/reload 接收GET请求，重新加载配置文件， 需要判断authtoken是否正确
 app.get("/api/v1/reload", (req, res) => {
     if (req.query.authtoken == config.authtoken) {
         try {
             let config1 = YAML.parse(fs.readFileSync(configPath, "utf8"));
-            let qbservers1 = [];
-            for (let i = 0; i < config1.qbservers.length; i++) {
-                try {
-                    qbservers1.push(new qbServer(config.qbservers[i]));
-                } catch (e) {
-                    console.log(e);
-                }
-            }
+            let qbserverlist1 = new qbServerList(config1.qbservers);
             config = config1;
-            qbservers = qbservers1;
+            qbserverlist = qbserverlist1;
             res.json({ info: "reloaded" });
         } catch (e) {
             res.json({ info: "error" });
@@ -146,18 +162,14 @@ app.post(
     asyncHandler(async (req, res) => {
         let magnetURI = req.body.magnetURI;
         let torrent = await parseTorrent(magnetURI);
-        let resdict = await sendToServers(torrent);
+        let resdict = await qbserverlist.addTorrent(torrent);
         res.json({ info: resdict });
     })
 );
 
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
 app.get("/api/v1/servers/get", (req, res) => {
-    let serverInfo = [];
-    for (let i = 0; i < qbservers.length; i++) {
-        serverInfo.push(qbservers[i].info());
-    }
-    res.json({ info: serverInfo });
+    res.json(qbserverlist.info());
 });
 
 const port = config.port | 80;
