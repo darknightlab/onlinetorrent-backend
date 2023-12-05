@@ -24,8 +24,10 @@
         "cors": "^2.8.5",
         "express": "^4.18.2",
         "express-async-handler": "^1.2.0",
+        "http-proxy-middleware": "^2.0.6",
         "magnet-uri": "^7.0.5",
         "parse-torrent": "^11.0.14",
+        "socks-proxy-agent": "^8.0.2",
         "yaml": "^2.3.4"
     },
     "devDependencies": {

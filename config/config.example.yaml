@@ -1,5 +1,6 @@
 port: 80
 authtoken: 123456
+proxy: socks5://127.0.0.1:7890
 
 qbservers:
   - name: qBittorrent1

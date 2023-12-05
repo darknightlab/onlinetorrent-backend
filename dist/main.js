@@ -7,8 +7,11 @@ import { toMagnetURI } from "parse-torrent";
 import { qBittorrentClient } from "@robertklep/qbittorrent";
 import asyncHandler from "express-async-handler";
 import cors from "cors";
+import { createProxyMiddleware } from "http-proxy-middleware";
+import { SocksProxyAgent } from "socks-proxy-agent";
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
+const proxyAgent = new SocksProxyAgent(config.proxy);
 function sleep(ms) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
 }
@@ -66,7 +69,7 @@ class qbServer {
                         }
                     }
                     let resdict = await processPromisesDict(delres);
-                    console.log(resdict);
+                    // console.log(resdict);
                 }
             }
             catch (e) {
@@ -230,6 +233,14 @@ app.post("/api/v1/torrents/delete", asyncHandler(async (req, res) => {
     let torrent = await parseTorrent(hash);
     let resdict = await qbserverlist.torrentsDelete(torrent);
     res.json(resdict);
+}));
+app.use("/api/v1/bangumi.moe", createProxyMiddleware({
+    target: "https://bangumi.moe",
+    changeOrigin: true,
+    agent: proxyAgent,
+    pathRewrite: {
+        "^/api/v1/bangumi.moe": "",
+    },
 }));
 // 在 /api/v1/servers/get 接收GET请求，返回服务器的信息
 app.get("/api/v1/servers/get", (req, res) => {

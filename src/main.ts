@@ -8,9 +8,12 @@ import magnet from "magnet-uri";
 import { qBittorrentClient, TorrentAddParameters, TorrentInfoParameters } from "@robertklep/qbittorrent";
 import asyncHandler from "express-async-handler";
 import cors from "cors";
+import { createProxyMiddleware, Filter, Options, RequestHandler } from "http-proxy-middleware";
+import { SocksProxyAgent } from "socks-proxy-agent";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
+const proxyAgent = new SocksProxyAgent(config.proxy);
 
 function sleep(ms: number) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
@@ -75,7 +78,7 @@ class qbServer {
                         }
                     }
                     let resdict = await processPromisesDict(delres);
-                    console.log(resdict);
+                    // console.log(resdict);
                 }
             } catch (e) {
                 console.error(e);
@@ -253,6 +256,18 @@ app.post(
         let torrent = await parseTorrent(hash);
         let resdict = await qbserverlist.torrentsDelete(torrent);
         res.json(resdict);
+    })
+);
+
+app.use(
+    "/api/v1/bangumi.moe",
+    createProxyMiddleware({
+        target: "https://bangumi.moe",
+        changeOrigin: true,
+        agent: proxyAgent,
+        pathRewrite: {
+            "^/api/v1/bangumi.moe": "",
+        },
     })
 );
 
