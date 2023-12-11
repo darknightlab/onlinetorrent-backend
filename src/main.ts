@@ -64,7 +64,7 @@ class qbServer {
         this.online = true;
 
         this.checkOnlineTimer = setInterval(async () => {
-            await Promise.race([this.checkOnline(), sleep(60 * 1000)]);
+            await Promise.race([this.checkOnlineAndReconnect(), sleep(60 * 1000)]);
         }, 5 * 60 * 1000);
 
         this.checkFinishedTimer = setInterval(async () => {
@@ -91,11 +91,27 @@ class qbServer {
             let res = await this.qb.app.version();
             if (res) {
                 this.online = true;
-            } else {
-                this.online = false;
+                return true;
             }
-        } catch (e) {
-            this.online = false;
+        } catch (e) {}
+        this.online = false;
+        return false;
+    }
+
+    async checkOnlineAndReconnect() {
+        await this.checkOnline();
+
+        if (!this.online) {
+            console.log(`server ${this.name} is offline. try to reconnect...`);
+            try {
+                await this.qb.auth.login(this.username, this.password);
+                this.checkOnline();
+            } catch (e) {}
+            if (!this.online) {
+                console.log(`server ${this.name} reconnect failed.`);
+            } else {
+                console.log(`server ${this.name} reconnect success.`);
+            }
         }
     }
 
