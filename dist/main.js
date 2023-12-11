@@ -185,7 +185,7 @@ class qbServerList {
         };
         let tinfo = await this.torrentsInfo(p);
         for (let value of Object.values(tinfo)) {
-            resdict.magnetURI = resdict.magnetURI || value[0].magnet_uri;
+            resdict.magnetURI = resdict.magnetURI || value[0]?.magnet_uri;
         }
         return resdict;
     }
