@@ -198,7 +198,9 @@ class qbServerList {
     async torrentsAdd(torrent: magnet.Instance) {
         let results = [];
         for (let i = 0; i < this.qbservers.length; i++) {
-            results.push(this.qbservers[i].torrentsAdd(torrent));
+            if (this.qbservers[i].online) {
+                results.push(this.qbservers[i].torrentsAdd(torrent));
+            }
         }
         results = await processPromises(results);
 
