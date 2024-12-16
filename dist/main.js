@@ -11,7 +11,13 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import { SocksProxyAgent } from "socks-proxy-agent";
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
-const proxyAgent = new SocksProxyAgent(config.proxy);
+let proxyAgent;
+if (config.proxy) {
+    proxyAgent = new SocksProxyAgent(config.proxy);
+}
+else {
+    proxyAgent = undefined;
+}
 function sleep(ms) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
 }
@@ -184,7 +190,9 @@ class qbServerList {
     async torrentsAdd(torrent) {
         let results = [];
         for (let i = 0; i < this.qbservers.length; i++) {
-            results.push(this.qbservers[i].torrentsAdd(torrent));
+            if (this.qbservers[i].online) {
+                results.push(this.qbservers[i].torrentsAdd(torrent));
+            }
         }
         results = await processPromises(results);
         let resdict = {

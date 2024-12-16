@@ -13,7 +13,12 @@ import { SocksProxyAgent } from "socks-proxy-agent";
 
 const configPath = "./config/config.yaml";
 var config = YAML.parse(fs.readFileSync(configPath, "utf8"));
-const proxyAgent = new SocksProxyAgent(config.proxy);
+let proxyAgent: SocksProxyAgent | undefined;
+if (config.proxy) {
+    proxyAgent = new SocksProxyAgent(config.proxy);
+} else {
+    proxyAgent = undefined;
+}
 
 function sleep(ms: number) {
     return new Promise((resolve, reject) => setTimeout(resolve, ms, undefined));
